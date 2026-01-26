@@ -1,0 +1,158 @@
+# ===========================
+# Dependencies
+# ===========================
+node_modules/
+.pnpm-store/
+
+# ===========================
+# Build Outputs
+# ===========================
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Rust / Cargo
+target/
+Cargo.lock
+!backend/Cargo.lock
+!apps/desktop/src-tauri/Cargo.lock
+
+# ===========================
+# Environment Variables
+# ===========================
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.staging
+.env.staging.local
+.env*.local
+.env.bak
+
+# Keep example env files
+!.env.example
+!.env.*.example
+
+# ===========================
+# Tauri
+# ===========================
+# Tauri build artifacts
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
+
+# ===========================
+# IDE / Editors
+# ===========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+
+# ===========================
+# OS Generated Files
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===========================
+# Logs
+# ===========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ===========================
+# Runtime & Cache
+# ===========================
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.vercel/
+.output/
+*.pid
+*.pid.lock
+*.seed
+pids/
+
+# ===========================
+# Testing
+# ===========================
+coverage/
+.nyc_output/
+*.lcov
+
+# ===========================
+# TypeScript
+# ===========================
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ===========================
+# Rust
+# ===========================
+**/*.rs.bk
+*.pdb
+
+# ===========================
+# Misc
+# ===========================
+*.local
+.eslintcache
+.stylelintcache
+.prettierignore
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Debug
+debug/
+
+# Optional npm cache
+.npm/
+
+# Optional eslint cache
+.eslintcache
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# Yarn
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Credentials & Secrets
+*.pem
+*.key
+/config/master.key
+secrets/

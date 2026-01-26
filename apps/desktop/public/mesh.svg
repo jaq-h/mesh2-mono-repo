@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="#1DB954"/>
+
+  <!-- Mesh/wave pattern representing connectivity and music -->
+  <g fill="#ffffff">
+    <!-- Left sound wave / mesh element -->
+    <path d="M8 12c0-1.1.9-2 2-2s2 .9 2 2v8c0 1.1-.9 2-2 2s-2-.9-2-2v-8z" opacity="0.9"/>
+
+    <!-- Center sound wave / mesh element (taller) -->
+    <path d="M13 8c0-1.1.9-2 2-2s2 .9 2 2v16c0 1.1-.9 2-2 2s-2-.9-2-2V8z"/>
+
+    <!-- Right sound wave / mesh element -->
+    <path d="M18 10c0-1.1.9-2 2-2s2 .9 2 2v12c0 1.1-.9 2-2 2s-2-.9-2-2V10z" opacity="0.9"/>
+
+    <!-- Connecting dots (mesh nodes) -->
+    <circle cx="10" cy="16" r="1.5"/>
+    <circle cx="15" cy="16" r="1.5"/>
+    <circle cx="20" cy="16" r="1.5"/>
+  </g>
+</svg>

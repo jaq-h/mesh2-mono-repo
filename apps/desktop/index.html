@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/mesh.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Mesh Desktop - Control your Spotify playback" />
+    <meta name="theme-color" content="#1DB954" />
+    <title>Mesh Desktop</title>
+    <style>
+      /* Prevent text selection and drag for native feel */
+      body {
+        -webkit-user-select: none;
+        user-select: none;
+        overflow: hidden;
+      }
+      /* Allow text selection in specific areas */
+      input, textarea, [contenteditable="true"] {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

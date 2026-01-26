@@ -1,0 +1,30 @@
+{
+  "name": "mesh",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm run --parallel dev",
+    "dev:web": "pnpm --filter @mesh/web dev",
+    "dev:desktop": "pnpm --filter @mesh/desktop dev",
+    "dev:client": "pnpm --filter @mesh/client-v2 dev",
+    "build": "pnpm run -r build",
+    "build:web": "pnpm --filter @mesh/web build",
+    "build:desktop": "pnpm --filter @mesh/desktop build",
+    "build:client": "pnpm --filter @mesh/client-v2 build",
+    "typecheck": "pnpm run -r typecheck",
+    "typecheck:client": "pnpm --filter @mesh/client-v2 typecheck",
+    "lint": "pnpm run -r lint",
+    "lint:client": "pnpm --filter @mesh/client-v2 lint",
+    "clean": "pnpm run -r clean && rm -rf node_modules",
+    "install:all": "pnpm install"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  }
+}
