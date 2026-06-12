@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.mesh.spotify",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm dev:web-only",
     "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* https://api.spotify.com https://accounts.spotify.com; img-src 'self' https://i.scdn.co https://*.spotifycdn.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* https://api.spotify.com https://accounts.spotify.com; img-src 'self' https://*.scdn.co https://*.spotifycdn.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:"
     }
   },
   "bundle": {

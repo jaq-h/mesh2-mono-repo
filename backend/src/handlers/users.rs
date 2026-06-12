@@ -8,6 +8,7 @@
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::{issue, AuthedUser};
 use crate::error::{AppError, AppResult};
 use crate::models::{CreateUserParams, UpdateUserParams, User, UserResponse};
 use crate::spotify::{AuthenticatedUserResponse, SpotifyApiAdapter};
@@ -36,6 +37,16 @@ pub struct RefreshResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
     pub expires_in: i64,
+}
+
+/// Login response: the Spotify-profile-and-tokens payload the frontend already
+/// expects (flattened to top level), plus the Mesh session token issued for
+/// this user. Send it back as `Authorization: Bearer <mesh_token>`.
+#[derive(Debug, Serialize)]
+pub struct LoginResponse {
+    #[serde(flatten)]
+    pub user: AuthenticatedUserResponse,
+    pub mesh_token: String,
 }
 
 /// POST /api/login
@@ -95,8 +106,15 @@ pub async fn create(
 
     let _updated_user = User::update_tokens(&state.db, user.id, &update_params).await?;
 
-    // Return the Spotify user profile with tokens (frontend-compatible format)
-    let response = AuthenticatedUserResponse::from_profile_and_tokens(user_data, &auth_params);
+    // Issue a Mesh session JWT — identity for every subsequent authenticated call.
+    let mesh_token = issue(&user, &state.config)?;
+
+    // Return the Spotify user profile with tokens (frontend-compatible format),
+    // with the Mesh session token flattened alongside.
+    let response = LoginResponse {
+        user: AuthenticatedUserResponse::from_profile_and_tokens(user_data, &auth_params),
+        mesh_token,
+    };
 
     Ok(HttpResponse::Ok().json(response))
 }
@@ -116,7 +134,10 @@ pub async fn create(
 pub async fn refresh(
     state: web::Data<AppState>,
     body: web::Json<RefreshRequest>,
+    _authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
+    // Requires a valid Mesh session (the JWT outlives the Spotify access token).
+    // SPEC-002 will persist the rotated refresh token using `_authed.user_id()`.
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     // Refresh the token via Spotify API
@@ -145,11 +166,20 @@ pub struct UserPath {
 pub async fn show(
     state: web::Data<AppState>,
     path: web::Path<UserPath>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
     // Find user by display name
     let user = User::find_by_display_name(&state.db, &path.display_name)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("User '{}' not found", path.display_name)))?;
+
+    // TODO(SPEC-001): public "share my now-playing" needs an opt-in share token.
+    // Until that exists, callers may only view their own playback.
+    if user.id != authed.user_id() {
+        return Err(AppError::Unauthorized(
+            "You can only view your own playback".to_string(),
+        ));
+    }
 
     // Get access token
     let access_token = user.access_token.ok_or_else(|| {

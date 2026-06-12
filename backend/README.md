@@ -58,9 +58,10 @@ REDIRECT_URI=http://localhost:3000/redirect
 # Database configuration
 DATABASE_URL=postgres://username:password@localhost/mesh_api_development
 
-# JWT secrets
-JWT_SECRET=your_jwt_secret
-JWT_ALGORITHM=HS256
+# JWT (Mesh session tokens) — REQUIRED, the server refuses to start without it.
+# Generate one with:  openssl rand -hex 32
+# The signing algorithm is fixed to HS256 in code (not configurable).
+JWT_SECRET=
 
 # Server configuration
 HOST=127.0.0.1
@@ -93,6 +94,19 @@ cargo build --release
 
 ## API Endpoints
 
+### Authorization
+
+Every endpoint except `GET /api/auth` and `POST /api/login` requires a **Mesh session token**,
+sent as:
+
+```
+Authorization: Bearer <mesh_token>
+```
+
+The token is returned by `POST /api/login` (field `mesh_token`) and is valid for 7 days. Identity
+is taken **only** from this token — the old `?user={display_name}` query parameter and `user`
+request-body field have been removed (SPEC-001). Calls without a valid token receive `401`.
+
 ### Authentication (PKCE Flow)
 
 #### `GET /api/auth`
@@ -122,16 +136,16 @@ Exchanges Spotify authorization code for access tokens using PKCE.
 }
 ```
 
-**Response:**
+**Response:** (the Spotify profile + tokens, plus `mesh_token` for the `Authorization` header)
 ```json
 {
-  "id": 1,
+  "id": "spotify_user_id",
   "display_name": "username",
-  "profile_img_url": "https://...",
-  "spotify_id": "spotify_user_id",
-  "spotify_url": "https://open.spotify.com/user/...",
+  "email": "user@example.com",
   "access_token": "spotify_access_token",
-  "email": "user@example.com"
+  "refresh_token": "spotify_refresh_token",
+  "token_expires_at": "2026-06-12T18:00:00Z",
+  "mesh_token": "<jwt — send as Authorization: Bearer on every other call>"
 }
 ```
 
@@ -141,7 +155,8 @@ Exchanges Spotify authorization code for access tokens using PKCE.
 
 #### `GET /api/users/{display_name}`
 
-Gets the currently playing track for a user.
+Gets the currently playing track. Requires `Authorization: Bearer <mesh_token>`, and
+`{display_name}` must resolve to the authenticated user (self-only; `403`/`401` otherwise).
 
 **Response (when playing):**
 ```json
@@ -160,9 +175,10 @@ Gets the currently playing track for a user.
 
 ### Player / Remote Control
 
-All player endpoints require a `user` parameter to identify which user's Spotify account to control.
+All player endpoints require `Authorization: Bearer <mesh_token>`. They act on the
+authenticated user's Spotify account — there is no `user` parameter.
 
-#### `GET /api/player/state?user={display_name}`
+#### `GET /api/player/state`
 
 Get full playback state including device, shuffle, repeat mode.
 
@@ -186,13 +202,13 @@ Get full playback state including device, shuffle, repeat mode.
 
 ---
 
-#### `GET /api/player/currently-playing?user={display_name}`
+#### `GET /api/player/currently-playing`
 
 Get just the currently playing track.
 
 ---
 
-#### `GET /api/player/devices?user={display_name}`
+#### `GET /api/player/devices`
 
 Get all available Spotify devices.
 
@@ -227,7 +243,6 @@ Start or resume playback.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "context_uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
   "uris": ["spotify:track:4iV5W9uYEdYUVa79Axb7Rh"],
@@ -245,7 +260,6 @@ Pause playback.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id"
 }
 ```
@@ -259,7 +273,6 @@ Skip to next track.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id"
 }
 ```
@@ -273,7 +286,6 @@ Skip to previous track.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id"
 }
 ```
@@ -287,7 +299,6 @@ Seek to position in current track.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "position_ms": 30000
 }
@@ -302,7 +313,6 @@ Set volume (0-100).
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "volume_percent": 50
 }
@@ -317,7 +327,6 @@ Set shuffle state.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "state": true
 }
@@ -332,7 +341,6 @@ Set repeat mode.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "state": "track"
 }
@@ -349,7 +357,6 @@ Transfer playback to another device.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "target_device_id",
   "play": true
 }
@@ -364,7 +371,6 @@ Add a track to the queue.
 **Request Body:**
 ```json
 {
-  "user": "display_name",
   "device_id": "optional_device_id",
   "uri": "spotify:track:4iV5W9uYEdYUVa79Axb7Rh"
 }
@@ -449,35 +455,35 @@ curl http://localhost:8080/api/auth
 
 # 2. Open auth_url in browser, authorize, copy code from redirect
 
-# 3. Exchange code for user session
+# 3. Exchange code for user session — save the `mesh_token` from the response
 curl -X POST http://localhost:8080/api/login \
   -H "Content-Type: application/json" \
   -d '{"code": "YOUR_CODE", "code_verifier": "YOUR_CODE_VERIFIER"}'
 
+# Every call below requires the Mesh session token:
+TOKEN=YOUR_MESH_TOKEN
+
 # 4. Get available devices
-curl "http://localhost:8080/api/player/devices?user=YOUR_DISPLAY_NAME"
+curl http://localhost:8080/api/player/devices -H "Authorization: Bearer $TOKEN"
 
 # 5. Get currently playing
-curl "http://localhost:8080/api/player/currently-playing?user=YOUR_DISPLAY_NAME"
+curl http://localhost:8080/api/player/currently-playing -H "Authorization: Bearer $TOKEN"
 
 # 6. Play/pause
 curl -X POST http://localhost:8080/api/player/play \
-  -H "Content-Type: application/json" \
-  -d '{"user": "YOUR_DISPLAY_NAME"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 
 curl -X POST http://localhost:8080/api/player/pause \
-  -H "Content-Type: application/json" \
-  -d '{"user": "YOUR_DISPLAY_NAME"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 
 # 7. Skip tracks
 curl -X POST http://localhost:8080/api/player/next \
-  -H "Content-Type: application/json" \
-  -d '{"user": "YOUR_DISPLAY_NAME"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 
 # 8. Set volume
 curl -X POST http://localhost:8080/api/player/volume \
-  -H "Content-Type: application/json" \
-  -d '{"user": "YOUR_DISPLAY_NAME", "volume_percent": 50}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"volume_percent": 50}'
 ```
 
 ---

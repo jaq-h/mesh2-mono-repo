@@ -148,6 +148,7 @@ export class TauriSpotifyService implements SpotifyService {
   private eventListeners: UnlistenFn[] = [];
   private cachedSettings: AppSettings = DEFAULT_SETTINGS;
   private _settingsLoaded: boolean = false;
+  private lastKnownDevice: SpotifyDevice | null = null;
 
   constructor() {
     // Setup event listeners for Tauri events
@@ -222,7 +223,7 @@ export class TauriSpotifyService implements SpotifyService {
     }
 
     return {
-      device: null,
+      device: this.lastKnownDevice,
       repeat_state: "off" as RepeatMode,
       shuffle_state: false,
       context: null,
@@ -498,6 +499,10 @@ export class TauriSpotifyService implements SpotifyService {
         return null;
       }
 
+      if (state.device) {
+        this.lastKnownDevice = state.device;
+      }
+
       // Transform to standard PlaybackState format
       return {
         device: state.device || null,
@@ -608,10 +613,17 @@ export class TauriSpotifyService implements SpotifyService {
 
   async setVolume(volumePercent: number, deviceId?: string): Promise<void> {
     try {
+      const rounded = Math.round(volumePercent);
       await invoke("set_volume", {
-        volumePercent: Math.round(volumePercent),
+        volumePercent: rounded,
         deviceId: deviceId || null,
       });
+      if (this.lastKnownDevice) {
+        this.lastKnownDevice = {
+          ...this.lastKnownDevice,
+          volume_percent: rounded,
+        };
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Set volume failed: ${message}`);
@@ -649,7 +661,12 @@ export class TauriSpotifyService implements SpotifyService {
   async getDevices(): Promise<SpotifyDevice[]> {
     try {
       const devices = await invoke<SpotifyDevice[]>("get_devices");
-      return devices || [];
+      const list = devices || [];
+      const active = list.find((d) => d.is_active);
+      if (active) {
+        this.lastKnownDevice = active;
+      }
+      return list;
     } catch (error) {
       console.error("getDevices error:", error);
       return [];
