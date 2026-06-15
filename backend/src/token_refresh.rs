@@ -112,7 +112,7 @@ impl TokenRefreshTask {
             SELECT id, display_name, profile_img_url, spotify_id, spotify_url,
                    access_token, refresh_token, email, created_at, updated_at
             FROM users
-            WHERE refresh_token IS NOT NULL AND refresh_token != ''
+            WHERE refresh_token IS NOT NULL
             "#,
         )
         .fetch_all(&self.pool)
