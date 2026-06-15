@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{issue, AuthedUser};
 use crate::error::{AppError, AppResult};
-use crate::models::{CreateUserParams, UpdateUserParams, User, UserResponse};
+use crate::models::{CreateUserParams, User, UserResponse};
 use crate::spotify::{AuthenticatedUserResponse, SpotifyApiAdapter};
 use crate::AppState;
 
@@ -85,28 +85,23 @@ pub async fn create(
         .and_then(|images| images.first())
         .map(|img| img.url.clone());
 
-    // Build create user params
-    let create_params = CreateUserParams {
-        display_name: user_data
-            .display_name
-            .clone()
-            .unwrap_or_else(|| user_data.id.clone()),
+    // Atomic upsert keyed on the stable Spotify id: creates the user on first
+    // login and refreshes their profile + tokens on subsequent logins, without
+    // ever overwriting a stored refresh token with an empty one (SPEC-002).
+    let upsert_params = CreateUserParams {
+        spotify_id: user_data.id.clone(),
+        display_name: user_data.display_name.clone(),
         spotify_url: user_data.external_urls.spotify.clone(),
-    };
-
-    // Find or create user in database
-    let user = User::find_or_create(&state.db, &create_params).await?;
-
-    // Update user with new tokens and profile image
-    let update_params = UpdateUserParams {
         profile_img_url: img_url,
         access_token: auth_params.access_token.clone(),
-        refresh_token: auth_params.refresh_token.clone().unwrap_or_default(),
+        refresh_token: auth_params.refresh_token.clone(),
+        email: user_data.email.clone(),
     };
 
-    let _updated_user = User::update_tokens(&state.db, user.id, &update_params).await?;
+    let user = User::upsert_from_login(&state.db, &upsert_params).await?;
 
-    // Issue a Mesh session JWT — identity for every subsequent authenticated call.
+    // Issue a Mesh session JWT — identity for every subsequent authenticated
+    // call. Now carries the populated spotify_id.
     let mesh_token = issue(&user, &state.config)?;
 
     // Return the Spotify user profile with tokens (frontend-compatible format),
@@ -134,14 +129,25 @@ pub async fn create(
 pub async fn refresh(
     state: web::Data<AppState>,
     body: web::Json<RefreshRequest>,
-    _authed: AuthedUser,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
     // Requires a valid Mesh session (the JWT outlives the Spotify access token).
-    // SPEC-002 will persist the rotated refresh token using `_authed.user_id()`.
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     // Refresh the token via Spotify API
     let token_response = spotify.refresh_token(&body.refresh_token).await?;
+
+    // Persist the rotated tokens to the authenticated user's row so the DB and
+    // the 25-minute refresh cron stay in sync with the client. Spotify may or
+    // may not return a new refresh token; the stored one is kept when it doesn't
+    // (SPEC-002).
+    User::persist_refreshed_tokens(
+        &state.db,
+        authed.user_id(),
+        &token_response.access_token,
+        token_response.refresh_token.as_deref(),
+    )
+    .await?;
 
     let response = RefreshResponse {
         access_token: token_response.access_token,
