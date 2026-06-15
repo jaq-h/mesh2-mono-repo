@@ -41,6 +41,11 @@ export interface PlayerPageProps {
    * @default 30000
    */
   deviceRefreshInterval?: number;
+
+  /**
+   * Extra actions rendered in the header, before the Logout button
+   */
+  headerActions?: React.ReactNode;
 }
 
 // =============================================================================
@@ -52,6 +57,7 @@ export function PlayerPage({
   onUnauthenticated,
   className = "",
   deviceRefreshInterval = 30000,
+  headerActions,
 }: PlayerPageProps) {
   const { user, isAuthenticated } = useSpotify();
   const { logout } = useSpotifyAuth();
@@ -291,6 +297,7 @@ export function PlayerPage({
               <RefreshIcon />
             )}
           </button>
+          {headerActions}
           <button className="player-page__logout" onClick={handleLogout}>
             Logout
           </button>

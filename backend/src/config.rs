@@ -50,11 +50,6 @@ impl Config {
         })
     }
 
-    /// Returns the Spotify authorization URL base
-    pub fn spotify_auth_url(&self) -> &str {
-        "https://accounts.spotify.com/authorize"
-    }
-
     /// Returns the Spotify token URL
     pub fn spotify_token_url(&self) -> &str {
         "https://accounts.spotify.com/api/token"

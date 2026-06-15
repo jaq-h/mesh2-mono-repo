@@ -60,6 +60,7 @@ function RedirectPageWrapper() {
     <RedirectPage
       appName="Mesh"
       getAuthCode={() => searchParams.get("code")}
+      getAuthState={() => searchParams.get("state")}
       getAuthError={() => {
         const error = searchParams.get("error");
         if (error) {

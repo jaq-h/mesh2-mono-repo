@@ -12,6 +12,7 @@ import {
   type RepeatMode,
   type PlayOptions,
   SPOTIFY_API_BASE,
+  SPOTIFY_ACCOUNTS_BASE,
 } from "@mesh/spotify-api";
 
 // =============================================================================
@@ -31,17 +32,67 @@ const STORAGE_KEYS = {
 // Types
 // =============================================================================
 
-interface PKCEAuthResponse {
-  auth_url: string;
-  code_verifier: string;
-  code_challenge: string;
-  state: string;
+interface AuthConfigResponse {
+  client_id: string;
+  redirect_uri: string;
+  scopes: string;
 }
 
 interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
+}
+
+// =============================================================================
+// PKCE + state helpers (client-side, SPEC-003)
+// =============================================================================
+
+/** sessionStorage wrapper — verifier/state are single-login and tab-scoped. */
+const session = {
+  get: (key: string): string | null => {
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set: (key: string, value: string): void => {
+    try {
+      sessionStorage.setItem(key, value);
+    } catch {
+      console.warn("Failed to save to sessionStorage:", key);
+    }
+  },
+  remove: (key: string): void => {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+  },
+};
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let str = "";
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** URL-safe random string derived from `byteLength` random bytes. */
+function randomUrlSafe(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+/** PKCE S256 challenge: base64url(SHA-256(verifier)). */
+async function sha256Challenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
+  return base64UrlEncode(new Uint8Array(digest));
 }
 
 // =============================================================================
@@ -135,6 +186,9 @@ export class WebSpotifyService implements SpotifyService {
 
   private clearStorage(): void {
     Object.values(STORAGE_KEYS).forEach((key) => storage.remove(key));
+    // verifier/state live in sessionStorage
+    session.remove(STORAGE_KEYS.CODE_VERIFIER);
+    session.remove(STORAGE_KEYS.AUTH_STATE);
     this.accessToken = null;
     this.refreshTokenValue = null;
     this.tokenExpiresAt = null;
@@ -307,27 +361,56 @@ export class WebSpotifyService implements SpotifyService {
   // ===========================================================================
 
   async login(): Promise<AuthenticatedUser> {
-    // Get PKCE auth URL from backend
-    const authData = await this.apiRequest<PKCEAuthResponse>("/api/auth");
+    // Fetch public OAuth config from the backend (no secrets, no PKCE material)
+    const config = await this.apiRequest<AuthConfigResponse>("/api/auth");
 
-    // Store PKCE verifier for callback
-    storage.set(STORAGE_KEYS.CODE_VERIFIER, authData.code_verifier);
-    storage.set(STORAGE_KEYS.AUTH_STATE, authData.state);
+    // Generate the PKCE verifier/challenge and an anti-CSRF state — all client-side
+    const codeVerifier = randomUrlSafe(48);
+    const codeChallenge = await sha256Challenge(codeVerifier);
+    const state = randomUrlSafe(16);
 
-    // Redirect to Spotify authorization
-    window.location.href = authData.auth_url;
+    // Keep verifier + state for the callback (tab-scoped, single login)
+    session.set(STORAGE_KEYS.CODE_VERIFIER, codeVerifier);
+    session.set(STORAGE_KEYS.AUTH_STATE, state);
+
+    // Build the Spotify authorization URL ourselves
+    const authUrl = new URL(`${SPOTIFY_ACCOUNTS_BASE}/authorize`);
+    authUrl.searchParams.set("client_id", config.client_id);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("redirect_uri", config.redirect_uri);
+    authUrl.searchParams.set("scope", config.scopes);
+    authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("code_challenge", codeChallenge);
+    authUrl.searchParams.set("state", state);
+
+    // Redirect to Spotify; the callback handler completes the login
+    window.location.href = authUrl.toString();
 
     // This won't actually return - the page will redirect
-    // The callback handler will complete the login
     throw new Error("Redirecting to Spotify...");
   }
 
   /**
-   * Complete the login process after OAuth callback
-   * Call this from your redirect handler with the authorization code
+   * Complete the login process after the OAuth callback.
+   * Validates the anti-CSRF `state` before exchanging the code.
    */
-  async handleCallback(code: string): Promise<AuthenticatedUser> {
-    const codeVerifier = storage.get(STORAGE_KEYS.CODE_VERIFIER);
+  async handleCallback(
+    code: string,
+    returnedState?: string,
+  ): Promise<AuthenticatedUser> {
+    const codeVerifier = session.get(STORAGE_KEYS.CODE_VERIFIER);
+    const storedState = session.get(STORAGE_KEYS.AUTH_STATE);
+
+    // One-time use: clear immediately so nothing can be replayed on any path.
+    session.remove(STORAGE_KEYS.CODE_VERIFIER);
+    session.remove(STORAGE_KEYS.AUTH_STATE);
+
+    // Validate state BEFORE the token exchange.
+    if (!storedState || !returnedState || returnedState !== storedState) {
+      throw new Error(
+        "OAuth state mismatch — possible CSRF. Please try logging in again.",
+      );
+    }
 
     if (!codeVerifier) {
       throw new Error("Missing code verifier. Please try logging in again.");
@@ -341,10 +424,6 @@ export class WebSpotifyService implements SpotifyService {
         code_verifier: codeVerifier,
       }),
     });
-
-    // Clear PKCE data
-    storage.remove(STORAGE_KEYS.CODE_VERIFIER);
-    storage.remove(STORAGE_KEYS.AUTH_STATE);
 
     // Save auth data
     this.saveToStorage(user);
