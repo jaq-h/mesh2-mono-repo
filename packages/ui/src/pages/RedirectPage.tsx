@@ -23,6 +23,12 @@ export interface RedirectPageProps {
   getAuthCode: () => string | null;
 
   /**
+   * Get the OAuth `state` param from the current URL, validated against the
+   * stored value to guard against CSRF.
+   */
+  getAuthState?: () => string | null;
+
+  /**
    * Get any error from the OAuth response
    */
   getAuthError?: () => { error: string; description?: string } | null;
@@ -55,6 +61,7 @@ export interface RedirectPageProps {
 export function RedirectPage({
   appName = "Mesh",
   getAuthCode,
+  getAuthState,
   getAuthError,
   onSuccess,
   onError,
@@ -96,9 +103,12 @@ export function RedirectPage({
         return;
       }
 
+      // Get the state param (validated against the stored value for CSRF)
+      const state = getAuthState?.() ?? undefined;
+
       try {
-        // Process the callback (exchanges code for tokens)
-        await handleCallback(code);
+        // Process the callback (validates state, then exchanges code for tokens)
+        await handleCallback(code, state);
         setStatus("success");
 
         // Give UI a moment to show success, then navigate
@@ -115,7 +125,7 @@ export function RedirectPage({
     };
 
     processCallback();
-  }, [getAuthCode, getAuthError, handleCallback, onSuccess]);
+  }, [getAuthCode, getAuthState, getAuthError, handleCallback, onSuccess]);
 
   // ==========================================================================
   // Render based on status

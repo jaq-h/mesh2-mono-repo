@@ -43,19 +43,17 @@ impl From<User> for UserResponse {
     }
 }
 
-/// Parameters for creating or finding a user
+/// Parameters for the login upsert (create-or-refresh, keyed on `spotify_id`).
 #[derive(Debug, Clone)]
 pub struct CreateUserParams {
-    pub display_name: String,
+    pub spotify_id: String,
+    pub display_name: Option<String>,
     pub spotify_url: String,
-}
-
-/// Parameters for updating a user's tokens and profile image
-#[derive(Debug, Clone)]
-pub struct UpdateUserParams {
     pub profile_img_url: Option<String>,
     pub access_token: String,
-    pub refresh_token: String,
+    /// `None`/empty leaves any stored refresh token untouched on upsert.
+    pub refresh_token: Option<String>,
+    pub email: Option<String>,
 }
 
 /// Session model (if needed for session tracking)
@@ -99,72 +97,67 @@ impl User {
         .await
     }
 
-    /// Find a user by spotify_url
-    pub async fn find_by_spotify_url(
-        pool: &sqlx::PgPool,
-        spotify_url: &str,
-    ) -> Result<Option<User>, sqlx::Error> {
-        sqlx::query_as::<_, User>(
-            r#"
-            SELECT id, display_name, profile_img_url, spotify_id, spotify_url,
-                   access_token, refresh_token, email, created_at, updated_at
-            FROM users
-            WHERE spotify_url = $1
-            "#,
-        )
-        .bind(spotify_url)
-        .fetch_optional(pool)
-        .await
-    }
-
-    /// Find or create a user by display_name and spotify_url
-    pub async fn find_or_create(
+    /// Create-or-refresh a user on login, keyed on the stable `spotify_id`.
+    ///
+    /// First login inserts the row; later logins refresh the profile and tokens.
+    /// A `None`/empty refresh token never overwrites a stored one. Atomic and
+    /// race-safe against concurrent first logins (relies on the
+    /// `users_spotify_id_key` unique index).
+    pub async fn upsert_from_login(
         pool: &sqlx::PgPool,
         params: &CreateUserParams,
     ) -> Result<User, sqlx::Error> {
-        // First try to find existing user
-        if let Some(user) = Self::find_by_spotify_url(pool, &params.spotify_url).await? {
-            return Ok(user);
-        }
-
-        // Create new user if not found
-        let user = sqlx::query_as::<_, User>(
-            r#"
-            INSERT INTO users (display_name, spotify_url, created_at, updated_at)
-            VALUES ($1, $2, NOW(), NOW())
-            RETURNING id, display_name, profile_img_url, spotify_id, spotify_url,
-                      access_token, refresh_token, email, created_at, updated_at
-            "#,
-        )
-        .bind(&params.display_name)
-        .bind(&params.spotify_url)
-        .fetch_one(pool)
-        .await?;
-
-        Ok(user)
-    }
-
-    /// Update user's profile image and tokens
-    pub async fn update_tokens(
-        pool: &sqlx::PgPool,
-        user_id: i32,
-        params: &UpdateUserParams,
-    ) -> Result<User, sqlx::Error> {
         sqlx::query_as::<_, User>(
             r#"
-            UPDATE users
-            SET profile_img_url = $1, access_token = $2, refresh_token = $3, updated_at = NOW()
-            WHERE id = $4
+            INSERT INTO users (spotify_id, display_name, spotify_url, profile_img_url,
+                               access_token, refresh_token, email, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NOW(), NOW())
+            ON CONFLICT (spotify_id) DO UPDATE SET
+                display_name    = EXCLUDED.display_name,
+                spotify_url     = EXCLUDED.spotify_url,
+                profile_img_url = EXCLUDED.profile_img_url,
+                access_token    = EXCLUDED.access_token,
+                refresh_token   = COALESCE(NULLIF(EXCLUDED.refresh_token, ''), users.refresh_token),
+                email           = COALESCE(EXCLUDED.email, users.email),
+                updated_at      = NOW()
             RETURNING id, display_name, profile_img_url, spotify_id, spotify_url,
                       access_token, refresh_token, email, created_at, updated_at
             "#,
         )
+        .bind(&params.spotify_id)
+        .bind(&params.display_name)
+        .bind(&params.spotify_url)
         .bind(&params.profile_img_url)
         .bind(&params.access_token)
-        .bind(&params.refresh_token)
-        .bind(user_id)
+        .bind(params.refresh_token.as_deref().unwrap_or(""))
+        .bind(&params.email)
         .fetch_one(pool)
         .await
+    }
+
+    /// Persist rotated tokens after a refresh. A `None`/empty new refresh token
+    /// leaves the stored one untouched (Spotify does not always rotate it).
+    pub async fn persist_refreshed_tokens(
+        pool: &sqlx::PgPool,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET access_token = $1,
+                refresh_token = COALESCE(NULLIF($2, ''), refresh_token),
+                updated_at = NOW()
+            WHERE id = $3
+            "#,
+        )
+        .bind(access_token)
+        .bind(refresh_token.unwrap_or(""))
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 
     /// Find a user by ID

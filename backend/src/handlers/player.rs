@@ -13,10 +13,14 @@
 //! - POST /api/player/repeat - Set repeat mode
 //! - POST /api/player/transfer - Transfer playback to device
 //! - POST /api/player/queue - Add track to queue
+//!
+//! Identity always comes from the Mesh session token (`AuthedUser`), never from
+//! a request parameter. See SPEC-001.
 
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthedUser;
 use crate::error::{AppError, AppResult};
 use crate::models::User;
 use crate::spotify::{PlayOffset, PlayRequest, SpotifyApiAdapter};
@@ -26,11 +30,9 @@ use crate::AppState;
 // Request/Response Types
 // ============================================================================
 
-/// Query params for identifying the user
+/// Query/body params carrying an optional target device.
 #[derive(Debug, Deserialize)]
 pub struct UserQuery {
-    /// User's display name to identify them
-    pub user: String,
     /// Optional device ID to target
     pub device_id: Option<String>,
 }
@@ -38,8 +40,6 @@ pub struct UserQuery {
 /// Request to start playback
 #[derive(Debug, Deserialize)]
 pub struct PlayRequestBody {
-    /// User's display name
-    pub user: String,
     /// Optional device ID
     pub device_id: Option<String>,
     /// Spotify URI of context (album, artist, playlist)
@@ -57,7 +57,6 @@ pub struct PlayRequestBody {
 /// Request to seek to position
 #[derive(Debug, Deserialize)]
 pub struct SeekRequest {
-    pub user: String,
     pub device_id: Option<String>,
     pub position_ms: i64,
 }
@@ -65,7 +64,6 @@ pub struct SeekRequest {
 /// Request to set volume
 #[derive(Debug, Deserialize)]
 pub struct VolumeRequest {
-    pub user: String,
     pub device_id: Option<String>,
     pub volume_percent: i32,
 }
@@ -73,7 +71,6 @@ pub struct VolumeRequest {
 /// Request to set shuffle
 #[derive(Debug, Deserialize)]
 pub struct ShuffleRequest {
-    pub user: String,
     pub device_id: Option<String>,
     pub state: bool,
 }
@@ -81,7 +78,6 @@ pub struct ShuffleRequest {
 /// Request to set repeat mode
 #[derive(Debug, Deserialize)]
 pub struct RepeatRequest {
-    pub user: String,
     pub device_id: Option<String>,
     /// One of: "track", "context", "off"
     pub state: String,
@@ -90,7 +86,6 @@ pub struct RepeatRequest {
 /// Request to transfer playback
 #[derive(Debug, Deserialize)]
 pub struct TransferRequest {
-    pub user: String,
     pub device_id: String,
     #[serde(default)]
     pub play: bool,
@@ -99,7 +94,6 @@ pub struct TransferRequest {
 /// Request to add to queue
 #[derive(Debug, Deserialize)]
 pub struct QueueRequest {
-    pub user: String,
     pub device_id: Option<String>,
     /// Spotify URI of the track to add
     pub uri: String,
@@ -125,11 +119,11 @@ impl SuccessResponse {
 // Helper Functions
 // ============================================================================
 
-/// Get user's access token from database
-async fn get_user_token(pool: &sqlx::PgPool, display_name: &str) -> AppResult<String> {
-    let user = User::find_by_display_name(pool, display_name)
+/// Get the authenticated user's access token from the database.
+async fn get_user_token(pool: &sqlx::PgPool, user_id: i32) -> AppResult<String> {
+    let user = User::find_by_id(pool, user_id)
         .await?
-        .ok_or_else(|| AppError::NotFound(format!("User '{}' not found", display_name)))?;
+        .ok_or_else(|| AppError::NotFound(format!("User {} not found", user_id)))?;
 
     user.access_token.ok_or_else(|| {
         AppError::Unauthorized("User has no access token. Please login again.".to_string())
@@ -142,12 +136,12 @@ async fn get_user_token(pool: &sqlx::PgPool, display_name: &str) -> AppResult<St
 
 /// GET /api/player/state
 ///
-/// Get current playback state for a user
+/// Get current playback state for the authenticated user
 pub async fn get_state(
     state: web::Data<AppState>,
-    query: web::Query<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &query.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     let playback_state = spotify.get_playback_state(&access_token).await?;
@@ -163,12 +157,12 @@ pub async fn get_state(
 
 /// GET /api/player/currently-playing
 ///
-/// Get currently playing track for a user
+/// Get currently playing track for the authenticated user
 pub async fn get_currently_playing(
     state: web::Data<AppState>,
-    query: web::Query<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &query.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     let currently_playing = spotify.currently_playing(&access_token).await?;
@@ -184,12 +178,12 @@ pub async fn get_currently_playing(
 
 /// GET /api/player/devices
 ///
-/// Get available devices for a user
+/// Get available devices for the authenticated user
 pub async fn get_devices(
     state: web::Data<AppState>,
-    query: web::Query<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &query.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     let devices = spotify.get_devices(&access_token).await?;
@@ -205,8 +199,9 @@ pub async fn get_devices(
 pub async fn play(
     state: web::Data<AppState>,
     body: web::Json<PlayRequestBody>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     // Build play request if any options specified
@@ -247,8 +242,9 @@ pub async fn play(
 pub async fn pause(
     state: web::Data<AppState>,
     body: web::Json<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -264,8 +260,9 @@ pub async fn pause(
 pub async fn next(
     state: web::Data<AppState>,
     body: web::Json<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -281,8 +278,9 @@ pub async fn next(
 pub async fn previous(
     state: web::Data<AppState>,
     body: web::Json<UserQuery>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -298,8 +296,9 @@ pub async fn previous(
 pub async fn seek(
     state: web::Data<AppState>,
     body: web::Json<SeekRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -318,8 +317,9 @@ pub async fn seek(
 pub async fn volume(
     state: web::Data<AppState>,
     body: web::Json<VolumeRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -342,8 +342,9 @@ pub async fn volume(
 pub async fn shuffle(
     state: web::Data<AppState>,
     body: web::Json<ShuffleRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -362,8 +363,9 @@ pub async fn shuffle(
 pub async fn repeat(
     state: web::Data<AppState>,
     body: web::Json<RepeatRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     // Validate repeat state
@@ -391,8 +393,9 @@ pub async fn repeat(
 pub async fn transfer(
     state: web::Data<AppState>,
     body: web::Json<TransferRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify
@@ -411,8 +414,9 @@ pub async fn transfer(
 pub async fn queue(
     state: web::Data<AppState>,
     body: web::Json<QueueRequest>,
+    authed: AuthedUser,
 ) -> AppResult<HttpResponse> {
-    let access_token = get_user_token(&state.db, &body.user).await?;
+    let access_token = get_user_token(&state.db, authed.user_id()).await?;
     let spotify = SpotifyApiAdapter::new(&state.http_client, &state.config);
 
     spotify

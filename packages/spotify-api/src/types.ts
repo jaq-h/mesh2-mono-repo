@@ -283,9 +283,10 @@ export interface SpotifyService {
    * This is used by web apps after redirect from Spotify
    * Desktop apps (Tauri) handle the full flow in login() instead
    * @param code - Authorization code from OAuth redirect
+   * @param state - OAuth state param, validated against the stored value (CSRF guard)
    * @returns Promise with user data after successful token exchange
    */
-  handleCallback?(code: string): Promise<AuthenticatedUser>;
+  handleCallback?(code: string, state?: string): Promise<AuthenticatedUser>;
 
   /**
    * Log out and clear all stored credentials

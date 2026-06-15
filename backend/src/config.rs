@@ -10,9 +10,8 @@ pub struct Config {
     // Database
     pub database_url: String,
 
-    // JWT
+    // JWT (Mesh session tokens)
     pub jwt_secret: String,
-    pub jwt_algorithm: String,
 
     // Server
     pub host: String,
@@ -33,10 +32,10 @@ impl Config {
             // Database
             database_url: std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
 
-            // JWT
-            jwt_secret: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "default_secret_change_in_production".to_string()),
-            jwt_algorithm: std::env::var("JWT_ALGORITHM").unwrap_or_else(|_| "HS256".to_string()),
+            // JWT (Mesh session tokens) — required, no insecure default.
+            // Algorithm is fixed to HS256 in `auth.rs` (not configurable) to
+            // avoid algorithm-confusion attacks.
+            jwt_secret: std::env::var("JWT_SECRET").context("JWT_SECRET must be set")?,
 
             // Server
             host: std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
@@ -49,11 +48,6 @@ impl Config {
             frontend_url: std::env::var("FRONTEND_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
         })
-    }
-
-    /// Returns the Spotify authorization URL base
-    pub fn spotify_auth_url(&self) -> &str {
-        "https://accounts.spotify.com/authorize"
     }
 
     /// Returns the Spotify token URL

@@ -8,9 +8,7 @@
 //! - Remote control (play, pause, skip, seek, volume, etc.)
 //! - Device management
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
@@ -188,52 +186,6 @@ pub struct SpotifyPlaybackState {
 }
 
 // ============================================================================
-// PKCE Helper Functions
-// ============================================================================
-
-/// Generate a cryptographically random code verifier for PKCE
-/// Returns a 64-character random string (URL-safe base64 encoded)
-pub fn generate_code_verifier() -> String {
-    use rand::Rng;
-    let random_bytes: Vec<u8> = (0..48).map(|_| rand::thread_rng().gen()).collect();
-    URL_SAFE_NO_PAD.encode(random_bytes)
-}
-
-/// Generate the code challenge from a code verifier using SHA256
-/// This is the S256 method required by Spotify
-pub fn generate_code_challenge(code_verifier: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(code_verifier.as_bytes());
-    let hash = hasher.finalize();
-    URL_SAFE_NO_PAD.encode(hash)
-}
-
-/// PKCE parameters for the authorization URL
-#[derive(Debug, Clone, Serialize)]
-pub struct PkceParams {
-    pub code_verifier: String,
-    pub code_challenge: String,
-}
-
-impl PkceParams {
-    /// Generate new PKCE parameters
-    pub fn new() -> Self {
-        let code_verifier = generate_code_verifier();
-        let code_challenge = generate_code_challenge(&code_verifier);
-        Self {
-            code_verifier,
-            code_challenge,
-        }
-    }
-}
-
-impl Default for PkceParams {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
 // Remote Control Request Types
 // ============================================================================
 
@@ -299,17 +251,19 @@ impl<'a> SpotifyApiAdapter<'a> {
     ) -> AppResult<SpotifyTokenResponse> {
         let token_url = self.config.spotify_token_url();
 
+        // Confidential client + PKCE: client credentials go via HTTP Basic auth,
+        // the code_verifier in the body. client_id is carried by Basic auth.
         let params = [
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", &self.config.redirect_uri),
-            ("client_id", &self.config.client_id),
             ("code_verifier", code_verifier),
         ];
 
         let response = self
             .client
             .post(token_url)
+            .basic_auth(&self.config.client_id, Some(&self.config.client_secret))
             .form(&params)
             .send()
             .await
@@ -330,19 +284,19 @@ impl<'a> SpotifyApiAdapter<'a> {
         Ok(token_response)
     }
 
-    /// Refresh an access token using a refresh token (PKCE version - no client_secret)
+    /// Refresh an access token using a refresh token (confidential client).
     pub async fn refresh_token(&self, refresh_token: &str) -> AppResult<SpotifyTokenResponse> {
         let token_url = self.config.spotify_token_url();
 
         let params = [
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
-            ("client_id", &self.config.client_id),
         ];
 
         let response = self
             .client
             .post(token_url)
+            .basic_auth(&self.config.client_id, Some(&self.config.client_secret))
             .form(&params)
             .send()
             .await
@@ -940,21 +894,3 @@ impl<'a> SpotifyApiAdapter<'a> {
     }
 }
 
-// ============================================================================
-// Authorization URL Builders
-// ============================================================================
-
-/// Build the Spotify authorization URL for OAuth redirect with PKCE
-pub fn build_auth_url_pkce(config: &Config, code_challenge: &str) -> String {
-    let params = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("client_id", &config.client_id)
-        .append_pair("response_type", "code")
-        .append_pair("redirect_uri", &config.redirect_uri)
-        .append_pair("scope", config.spotify_scopes())
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("code_challenge", code_challenge)
-        .append_pair("show_dialog", "true")
-        .finish();
-
-    format!("{}?{}", config.spotify_auth_url(), params)
-}

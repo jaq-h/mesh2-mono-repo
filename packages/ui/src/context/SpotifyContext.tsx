@@ -60,7 +60,7 @@ export interface SpotifyContextState {
 export interface SpotifyContextActions {
   // Auth
   login: () => Promise<void>;
-  handleCallback: (code: string) => Promise<void>;
+  handleCallback: (code: string, state?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
   clearAuthError: () => void;
@@ -270,7 +270,7 @@ export function SpotifyProvider({
   }, [service, autoStartPolling]);
 
   const handleCallback = useCallback(
-    async (code: string) => {
+    async (code: string, state?: string) => {
       setIsAuthLoading(true);
       setAuthError(null);
 
@@ -279,7 +279,10 @@ export function SpotifyProvider({
           "handleCallback" in service &&
           typeof (service as any).handleCallback === "function"
         ) {
-          const authenticatedUser = await (service as any).handleCallback(code);
+          const authenticatedUser = await (service as any).handleCallback(
+            code,
+            state,
+          );
           setUser(authenticatedUser);
 
           await refreshPlayback();

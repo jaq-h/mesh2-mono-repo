@@ -73,42 +73,38 @@ function PlayerPageWrapper() {
         onUnauthenticated={() => {
           navigate(ROUTES.LOGIN, { replace: true });
         }}
+        headerActions={
+          <button
+            onClick={() => setShowSettings(true)}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              borderRadius: "50%",
+              width: "32px",
+              height: "32px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#b3b3b3",
+              fontSize: "1rem",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,0.2)";
+              e.currentTarget.style.color = "#fff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+              e.currentTarget.style.color = "#b3b3b3";
+            }}
+            title="Settings"
+          >
+            ⚙
+          </button>
+        }
         deviceRefreshInterval={30000}
       />
-
-      {/* Settings Button */}
-      <button
-        onClick={() => setShowSettings(true)}
-        style={{
-          position: "fixed",
-          top: "1rem",
-          right: "1rem",
-          background: "rgba(255,255,255,0.1)",
-          border: "none",
-          borderRadius: "50%",
-          width: "36px",
-          height: "36px",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#b3b3b3",
-          fontSize: "1.25rem",
-          transition: "all 0.2s",
-          zIndex: 100,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(255,255,255,0.2)";
-          e.currentTarget.style.color = "#fff";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-          e.currentTarget.style.color = "#b3b3b3";
-        }}
-        title="Settings"
-      >
-        ⚙
-      </button>
 
       <Settings isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </>
